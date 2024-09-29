@@ -16,6 +16,8 @@ import sys
 import os
 from datetime import datetime
 import re
+import gzip
+import shutil
 
 
 
@@ -166,8 +168,71 @@ def preprocess_data(data):
     return data
 
 
+
+def python_unzip(input_fname, output_fname=False):
+    try:
+        dir = os.path.dirname(input_fname) #Getting the dir
+        fname_unzipped = str(input_fname)[:-3]   #Getting the fname without .gzip
+
+        if len ([f for f in os.listdir(dir) if f == fname_unzipped]) > 0:
+            print('Unzipped File Exists')
+
+        else:
+            with gzip.open(input_fname, 'r') as f:
+                    if output_fname ==False:
+                        with open(fname_unzipped, 'wb') as f_writ:
+                                shutil.copyfileobj(f, f_writ )
+                    else: 
+                        with open(output_fname, 'wb') as f_writ:
+                            shutil.copyfileobj(f, f_writ )
+
+            print('Just unzipped the file - the original has been kept')
+
+    except FileExistsError as e:
+        print(f'File {input_fname} not found')
+    except Exception as e:
+        print(f'An error occurred: {e}')
+
+
 def mrf_unlock(df)-> pl.DataFrame:
     """A loop that unnest dicts and explodes list found in MRFs.
+        Args:
+            A polars dataframe
+        
+        Returns:
+            A clean polars dataframe
+    """
+    # Declaring
+    #Objects
+    ls_cols = []
+    dict_cols = []
+    df_test = df
+
+    while True:
+        # Get schema once
+            cols = df_test.schema
+
+            # Identify list and struct columns directly
+            ls_cols = [col for col, dtype in cols.items() if dtype == pl.List]
+            dict_cols = [col for col, dtype in cols.items() if dtype == pl.Struct]
+
+            # Check for empty lists
+            if not ls_cols and not dict_cols:
+                break
+
+            # Unnest structs first
+            for col in dict_cols:
+                df_test = df_test.unnest(col)
+
+            # Explode lists
+            for col in ls_cols:
+                df_test = df_test.explode(col)
+
+
+
+
+def mrf_unlock_dep(df):
+    """DEPRECATED: A loop that unnest dicts and explodes list found in MRFs.
 
     Args:
         A polars dataframe
@@ -181,9 +246,19 @@ def mrf_unlock(df)-> pl.DataFrame:
     #Objects
     ls_cols = []
     dict_cols = []
+    listfirst = False
 
     #Checking the schema
     col_type = df_test.schema
+    #Checking if list or struct comes first
+    cols_filt = {k:v for k,v in cols.items() if ('list' in str(v).lower()) or ('struct' in str(v).lower())}
+    min_idx_ls = (str(cols_filt.values()).lower().index('list'))
+    min_idx_dict = (str(cols_filt.values()).lower().index('struct'))
+
+    #listfirst
+    if min_idx_dict > min_idx_ls:
+        listfirst = True
+
     for k,v in col_type.items():
         
         if 'struct' in str(v).lower() and 'list' not in str(v).lower():
@@ -192,10 +267,10 @@ def mrf_unlock(df)-> pl.DataFrame:
         elif 'list' in str(v).lower() and 'struct' not in str(v).lower(): 
             ls_cols.append(k)
 
-        elif 'struct' in str(v).lower() and listfirst(str(v)) == False:
+        elif 'struct' in str(v).lower() and listfirst == False:
             dict_cols.append(k)
 
-        elif 'list' in str(v).lower() and listfirst(str(v)) == True:
+        elif 'list' in str(v).lower() and listfirst == True:
             ls_cols.append(k)
         
     #loop depending on ls size
@@ -263,5 +338,3 @@ def mrf_unlock(df)-> pl.DataFrame:
                 elif list_idx < dict_idx:
                     ls_cols.append(k)
                 
-
-
